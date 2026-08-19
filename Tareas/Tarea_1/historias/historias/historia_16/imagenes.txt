@@ -1,0 +1,7 @@
+Imagenes utilizadas en esta historia:
+
+- balon_futbol.jpg  (tema: deporte)
+- reloj_inteligente_dorado.jpg  (tema: tecnologia)
+- monedas_billetes_antiguos.jpg  (tema: economia)
+- nebulosa_orion.jpg  (tema: astronomia)
+- balon_rugby.jpg  (tema: deporte)

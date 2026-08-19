@@ -1,0 +1,7 @@
+Imagenes utilizadas en esta historia:
+
+- butacas_cine.jpg  (tema: cine)
+- granero_rural.jpg  (tema: arquitectura)
+- computadora_escritorio.jpg  (tema: tecnologia)
+- sombra_baloncesto_cancha.jpg  (tema: deporte)
+- guantes_boxeo_pasto.jpg  (tema: deporte)

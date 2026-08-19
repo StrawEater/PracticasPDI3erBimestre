@@ -1,0 +1,7 @@
+Imagenes utilizadas en esta historia:
+
+- raqueta_cancha_verde.jpg  (tema: deporte)
+- edificio_historico_bandera.jpg  (tema: politica)
+- cabinas_votacion_oficina.jpg  (tema: politica)
+- costa_verde_turquesa.jpg  (tema: playa)
+- nebulosa_cosmica.jpg  (tema: astronomia)

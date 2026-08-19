@@ -1,0 +1,6 @@
+Imagenes utilizadas en esta historia:
+
+- olla_hierro.jpg  (tema: cocina)
+- tribunal_bandera_francesa.jpg  (tema: politica)
+- estrella_mar.jpg  (tema: playa)
+- edificio_historico_bandera.jpg  (tema: politica)

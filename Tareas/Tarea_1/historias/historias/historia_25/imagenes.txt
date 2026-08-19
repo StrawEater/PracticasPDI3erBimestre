@@ -1,0 +1,6 @@
+Imagenes utilizadas en esta historia:
+
+- raqueta_cancha_verde.jpg  (tema: deporte)
+- nebula_norteamerica.jpg  (tema: astronomia)
+- pretzel_horneado.jpg  (tema: cocina)
+- acordeon_folclorico.jpg  (tema: musica)

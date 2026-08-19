@@ -1,0 +1,7 @@
+Imagenes utilizadas en esta historia:
+
+- computadora_escritorio.jpg  (tema: tecnologia)
+- joyeria_madera_clara.jpg  (tema: moda)
+- nebulosa_verde.jpg  (tema: astronomia)
+- guitarra_electrica.jpg  (tema: musica)
+- piedras_talladas_gobekli.jpg  (tema: historia)
