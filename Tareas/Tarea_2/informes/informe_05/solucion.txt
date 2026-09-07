@@ -1,0 +1,3 @@
+galaxia: Vecindario_Solar
+sector: Gigantes_Gaseosos
+planeta: Saturno

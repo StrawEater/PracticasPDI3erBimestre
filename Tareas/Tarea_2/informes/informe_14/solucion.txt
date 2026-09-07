@@ -1,0 +1,3 @@
+galaxia: Cumulo_Nebular
+sector: Nebulosas_de_Emision
+planeta: Roseta

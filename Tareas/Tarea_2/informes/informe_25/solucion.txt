@@ -1,0 +1,3 @@
+galaxia: Cumulo_de_Andromeda
+sector: Galaxias_Espirales
+planeta: Andromeda

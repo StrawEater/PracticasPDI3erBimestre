@@ -1,0 +1,3 @@
+galaxia: Vecindario_Solar
+sector: Planetas_Rocosos
+planeta: Venus

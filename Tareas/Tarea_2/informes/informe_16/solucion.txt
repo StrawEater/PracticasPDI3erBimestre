@@ -1,0 +1,3 @@
+galaxia: Cumulo_Nebular
+sector: Restos_Estelares
+planeta: Velo

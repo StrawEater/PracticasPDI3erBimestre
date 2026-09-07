@@ -1,0 +1,3 @@
+galaxia: Vecindario_Solar
+sector: Lunas_Heladas
+planeta: Io
