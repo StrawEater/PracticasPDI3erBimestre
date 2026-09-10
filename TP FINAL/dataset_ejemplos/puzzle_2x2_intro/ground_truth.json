@@ -1,0 +1,210 @@
+{
+    "source_image": "casita.jpg",
+    "rows": 2,
+    "cols": 2,
+    "num_pieces": 4,
+    "piece_shape": [
+        597,
+        800,
+        3
+    ],
+    "cell_size": [
+        597,
+        800
+    ],
+    "cut_type": "jigsaw",
+    "allow_rotations": false,
+    "slight_rotation": false,
+    "stripes": {
+        "enabled": false,
+        "period": 8,
+        "amplitude": 0.32,
+        "orientation_degrees": 0.0
+    },
+    "marker": null,
+    "seed": 10,
+    "solution_grid": [
+        [
+            3,
+            2
+        ],
+        [
+            1,
+            0
+        ]
+    ],
+    "pieces_info": {
+        "0": {
+            "piece_id": 0,
+            "filename": "piece_000.png",
+            "correct_row": 1,
+            "correct_col": 1,
+            "applied_rotation": 0,
+            "applied_jitter_degrees": 0.0,
+            "total_applied_rotation": 0.0,
+            "restoration_rotation": 0,
+            "restoration_jitter_degrees": -0.0,
+            "original_edge_types": {
+                "N": "MACHO",
+                "S": "PLANO",
+                "W": "MACHO",
+                "E": "PLANO"
+            },
+            "edge_types": {
+                "N": "MACHO",
+                "S": "PLANO",
+                "W": "MACHO",
+                "E": "PLANO"
+            },
+            "original_edge_curves": {
+                "N": "circular",
+                "S": "none",
+                "W": "circular",
+                "E": "none"
+            },
+            "edge_curves": {
+                "N": "circular",
+                "S": "none",
+                "W": "circular",
+                "E": "none"
+            },
+            "crop_offset": [
+                392,
+                545
+            ],
+            "cell_offset": [
+                -205,
+                -255
+            ]
+        },
+        "1": {
+            "piece_id": 1,
+            "filename": "piece_001.png",
+            "correct_row": 1,
+            "correct_col": 0,
+            "applied_rotation": 0,
+            "applied_jitter_degrees": 0.0,
+            "total_applied_rotation": 0.0,
+            "restoration_rotation": 0,
+            "restoration_jitter_degrees": -0.0,
+            "original_edge_types": {
+                "N": "HEMBRA",
+                "S": "PLANO",
+                "W": "PLANO",
+                "E": "HEMBRA"
+            },
+            "edge_types": {
+                "N": "HEMBRA",
+                "S": "PLANO",
+                "W": "PLANO",
+                "E": "HEMBRA"
+            },
+            "original_edge_curves": {
+                "N": "standard",
+                "S": "none",
+                "W": "none",
+                "E": "circular"
+            },
+            "edge_curves": {
+                "N": "standard",
+                "S": "none",
+                "W": "none",
+                "E": "circular"
+            },
+            "crop_offset": [
+                392,
+                -255
+            ],
+            "cell_offset": [
+                -205,
+                -255
+            ]
+        },
+        "2": {
+            "piece_id": 2,
+            "filename": "piece_002.png",
+            "correct_row": 0,
+            "correct_col": 1,
+            "applied_rotation": 0,
+            "applied_jitter_degrees": 0.0,
+            "total_applied_rotation": 0.0,
+            "restoration_rotation": 0,
+            "restoration_jitter_degrees": -0.0,
+            "original_edge_types": {
+                "N": "PLANO",
+                "S": "HEMBRA",
+                "W": "MACHO",
+                "E": "PLANO"
+            },
+            "edge_types": {
+                "N": "PLANO",
+                "S": "HEMBRA",
+                "W": "MACHO",
+                "E": "PLANO"
+            },
+            "original_edge_curves": {
+                "N": "none",
+                "S": "circular",
+                "W": "standard",
+                "E": "none"
+            },
+            "edge_curves": {
+                "N": "none",
+                "S": "circular",
+                "W": "standard",
+                "E": "none"
+            },
+            "crop_offset": [
+                -205,
+                545
+            ],
+            "cell_offset": [
+                -205,
+                -255
+            ]
+        },
+        "3": {
+            "piece_id": 3,
+            "filename": "piece_003.png",
+            "correct_row": 0,
+            "correct_col": 0,
+            "applied_rotation": 0,
+            "applied_jitter_degrees": 0.0,
+            "total_applied_rotation": 0.0,
+            "restoration_rotation": 0,
+            "restoration_jitter_degrees": -0.0,
+            "original_edge_types": {
+                "N": "PLANO",
+                "S": "MACHO",
+                "W": "PLANO",
+                "E": "HEMBRA"
+            },
+            "edge_types": {
+                "N": "PLANO",
+                "S": "MACHO",
+                "W": "PLANO",
+                "E": "HEMBRA"
+            },
+            "original_edge_curves": {
+                "N": "none",
+                "S": "standard",
+                "W": "none",
+                "E": "standard"
+            },
+            "edge_curves": {
+                "N": "none",
+                "S": "standard",
+                "W": "none",
+                "E": "standard"
+            },
+            "crop_offset": [
+                -205,
+                -255
+            ],
+            "cell_offset": [
+                -205,
+                -255
+            ]
+        }
+    }
+}
