@@ -1,10 +1,11 @@
 """
-Módulo de Procesamiento de Imágenes para la Extracción y Matcheo de Formas de Piezas:
-1. Binarización de piezas (Fondo Negro '0' vs. Pieza Completa '255') mediante Otsu o umbralización.
-2. Extracción de contornos externos y detección de esquinas del encastre.
-3. Partición del contorno en 4 lados (Norte, Sur, Este, Oeste).
-4. Clasificación morfológica de cada lado: 'PLANO', 'MACHO' (pestaña) o 'HEMBRA' (hueco).
-5. Matcheo de forma de bordes complementarios.
+Módulo de Procesamiento de Imágenes para la Extracción, Clasificación y Correlación de Bordes:
+1. Binarización limpia (Fondo Negro '0' vs. Pieza '255') con relleno morfológico de huecos.
+2. Extracción del contorno externo y detección precisa de las 4 esquinas de la grilla.
+3. Partición del contorno en 4 señales 1D (Norte, Este, Sur, Oeste) de desviación perpendicular.
+4. Clasificación topológica de la pieza: ESQUINA (2 lados planos), BORDE (1 lado plano), INTERIOR (0 planos).
+5. Cálculo de la matriz de correlación / producto interno normalizado (estilo Fourier) entre bordes de piezas:
+   da 1.0 para match perfecto, ~0.0 para no-match / desfasado en altura, y 0.0 para incompatibles.
 """
 
 import cv2
@@ -14,30 +15,27 @@ from typing import Dict, List, Tuple, Any, Optional
 
 def binarize_piece(
     img_rgb: np.ndarray,
-    method: str = "otsu",
-    fixed_threshold: int = 5
+    fixed_threshold: int = 0
 ) -> np.ndarray:
     """
-    Binariza la imagen de la pieza aislando la silueta completa (blanco = 255)
-    del fondo negro (negro = 0).
-    
-    Args:
-        img_rgb: Imagen RGB de la pieza (fondo negro 0,0,0).
-        method: 'otsu' para binarización automática o 'threshold' con valor fijo.
-        fixed_threshold: Umbral para método fijo.
-        
-    Returns:
-        Máscara binaria uint8 (255 para la pieza, 0 para el fondo).
+    Binariza la imagen de la pieza aislando la silueta completa (255)
+    del fondo negro (0), con relleno de agujeros para evitar que sombras oscuras
+    dentro de la textura de la imagen creen ranuras falsas.
     """
-    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-    
-    if method.lower() == "otsu":
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    if img_rgb.ndim == 3:
+        max_channel = np.max(img_rgb, axis=2)
     else:
-        _, binary = cv2.threshold(gray, fixed_threshold, 255, cv2.THRESH_BINARY)
+        max_channel = img_rgb
         
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    _, binary = cv2.threshold(max_channel, fixed_threshold, 255, cv2.THRESH_BINARY)
+    
+    # Relleno de agujeros interiores mediante floodFill desde el borde exterior
+    h, w = binary.shape
+    mask_flood = np.zeros((h + 2, w + 2), np.uint8)
+    bin_inv = cv2.floodFill(binary.copy(), mask_flood, (0, 0), 255)[1]
+    bin_filled = cv2.bitwise_not(bin_inv)
+    binary = cv2.bitwise_or(binary, bin_filled)
+    
     return binary
 
 
@@ -56,8 +54,7 @@ def detect_jigsaw_corners(
     contour_pts: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Detecta las 4 esquinas base (TL, TR, BR, BL) de la pieza.
-    Las esquinas son los vértices de la grilla rectangular de la pieza.
+    Detecta las 4 esquinas base (TL, TR, BR, BL) de la pieza rectangular nominal.
     """
     mid_x, mid_y = np.mean(contour_pts, axis=0)
     
@@ -79,11 +76,12 @@ def detect_jigsaw_corners(
 
 def detect_corners_and_split_sides(
     contour_pts: np.ndarray,
-    binary_mask: np.ndarray
-) -> Dict[str, Dict[str, Any]]:
+    binary_mask: np.ndarray,
+    num_samples: int = 100
+) -> Dict[str, Any]:
     """
-    Segmenta el contorno en los 4 lados orientados (N, E, S, W)
-    y clasifica morfológicamente cada lado como PLANO, MACHO o HEMBRA.
+    Segmenta el contorno en los 4 lados orientados (N, E, S, W),
+    extrae la señal 1D de desviación perpendicular regularizada y clasifica cada lado.
     """
     c_tl, c_tr, c_br, c_bl = detect_jigsaw_corners(contour_pts)
     
@@ -102,131 +100,184 @@ def detect_corners_and_split_sides(
     i_br_s = (i_br - i_tl) % n
     i_bl_s = (i_bl - i_tl) % n
     
-    # Determinar si el contorno recorre en sentido horario o antihorario
-    # Si i_bl_s < i_tr_s, recorre antihorario (TL -> BL -> BR -> TR)
+    # Determinar sentido de recorrido (horario o antihorario)
     if i_bl_s < i_tr_s:
-        # Antihorario
-        curve_w = shifted[0 : i_bl_s + 1]
-        curve_s = shifted[i_bl_s : i_br_s + 1]
-        curve_e = shifted[i_br_s : i_tr_s + 1]
-        curve_n = np.vstack([shifted[i_tr_s:], shifted[0:1]])
-        # Invertir para que todos los lados se recorran consistentemente de inicio a fin nominal
-        curve_w = curve_w[::-1] # BL -> TL
-        curve_s = curve_s       # BL -> BR
-        curve_e = curve_e[::-1] # BR -> TR
-        curve_n = curve_n[::-1] # TL -> TR
+        # Antihorario: TL -> BL -> BR -> TR -> TL
+        curve_w = shifted[0 : i_bl_s + 1]             # TL -> BL
+        curve_s = shifted[i_bl_s : i_br_s + 1]        # BL -> BR
+        curve_e = shifted[i_br_s : i_tr_s + 1][::-1] # TR -> BR
+        curve_n = np.vstack([shifted[i_tr_s:], shifted[0:1]])[::-1] # TL -> TR
     else:
         # Horario: TL -> TR -> BR -> BL -> TL
-        curve_n = shifted[0 : i_tr_s + 1]
-        curve_e = shifted[i_tr_s : i_br_s + 1]
-        curve_s = shifted[i_br_s : i_bl_s + 1]
-        curve_w = np.vstack([shifted[i_bl_s:], shifted[0:1]])
+        curve_n = shifted[0 : i_tr_s + 1]              # TL -> TR
+        curve_e = shifted[i_tr_s : i_br_s + 1]         # TR -> BR
+        curve_s = shifted[i_br_s : i_bl_s + 1][::-1]  # BL -> BR
+        curve_w = np.vstack([shifted[i_bl_s:], shifted[0:1]])[::-1] # BL -> TL
         
-    def classify_edge(curve: np.ndarray, side_name: str) -> Tuple[str, np.ndarray, str]:
+    def extract_side_signal(curve: np.ndarray, side_name: str) -> Dict[str, Any]:
         p0 = curve[0].astype(np.float32)
         p1 = curve[-1].astype(np.float32)
         vec = p1 - p0
         length = float(np.linalg.norm(vec))
         if length == 0:
-            return "PLANO", np.zeros(50), "none"
+            return {
+                "type": "PLANO",
+                "profile": np.zeros(num_samples, dtype=np.float32),
+                "norm": 0.0,
+                "length": 0.0
+            }
             
         u = vec / length
-        n_outward = np.array([u[1], -u[0]], dtype=np.float32)
-        
-        # Ajustar signo del normal hacia afuera según lado
         if side_name == "N": normal_unit = np.array([0.0, -1.0])
         elif side_name == "S": normal_unit = np.array([0.0, 1.0])
         elif side_name == "W": normal_unit = np.array([-1.0, 0.0])
         elif side_name == "E": normal_unit = np.array([1.0, 0.0])
-        else: normal_unit = n_outward
+        else: normal_unit = np.array([u[1], -u[0]], dtype=np.float32)
         
         rel = curve.astype(np.float32) - p0
-        trans = np.dot(rel, normal_unit)
+        # Proyección sobre la tangente (0 a length)
+        proj_t = np.dot(rel, u)
+        # Desviación perpendicular (señal de bulbo)
+        dev = np.dot(rel, normal_unit)
         
-        # Resamplear a 50 puntos
+        # Muestreo regularizado en t in [0, 1]
         t_orig = np.linspace(0, 1, len(curve))
-        t_fixed = np.linspace(0, 1, 50)
-        profile_50 = np.interp(t_fixed, t_orig, trans)
+        t_target = np.linspace(0, 1, num_samples)
+        profile = np.interp(t_target, t_orig, dev).astype(np.float32)
         
-        max_dev = float(np.max(np.abs(profile_50)))
-        mean_dev = float(np.mean(profile_50))
+        max_dev = float(np.max(np.abs(profile)))
+        mean_dev = float(np.mean(profile))
         
-        if max_dev < length * 0.06:
+        # Umbral para clasificar como plano
+        if max_dev < length * 0.05:
             stype = "PLANO"
-            curve_type = "none"
+            profile = np.zeros(num_samples, dtype=np.float32)
         elif mean_dev > 0:
             stype = "MACHO"
-            curve_type = classify_profile_curve_type(profile_50, stype)
         else:
             stype = "HEMBRA"
-            curve_type = classify_profile_curve_type(profile_50, stype)
             
-        return stype, profile_50, curve_type
+        norm = float(np.linalg.norm(profile))
+        return {
+            "type": stype,
+            "profile": profile,
+            "norm": norm,
+            "length": length,
+            "max_dev": max_dev,
+            "mean_dev": mean_dev
+        }
 
-    type_n, prof_n, ctype_n = classify_edge(curve_n, "N")
-    type_e, prof_e, ctype_e = classify_edge(curve_e, "E")
-    type_s, prof_s, ctype_s = classify_edge(curve_s, "S")
-    type_w, prof_w, ctype_w = classify_edge(curve_w, "W")
+    info_n = extract_side_signal(curve_n, "N")
+    info_e = extract_side_signal(curve_e, "E")
+    info_s = extract_side_signal(curve_s, "S")
+    info_w = extract_side_signal(curve_w, "W")
     
+    # Clasificación topológica global de la pieza
+    types = [info_n["type"], info_e["type"], info_s["type"], info_w["type"]]
+    num_flat = sum(1 for t in types if t == "PLANO")
+    if num_flat == 2:
+        topology = "CORNER"
+    elif num_flat == 1:
+        topology = "BORDER"
+    else:
+        topology = "INTERIOR"
+        
     return {
-        "N": {"type": type_n, "profile": prof_n, "curve_type": ctype_n},
-        "E": {"type": type_e, "profile": prof_e, "curve_type": ctype_e},
-        "S": {"type": type_s, "profile": prof_s, "curve_type": ctype_s},
-        "W": {"type": type_w, "profile": prof_w, "curve_type": ctype_w},
+        "N": info_n,
+        "E": info_e,
+        "S": info_s,
+        "W": info_w,
+        "topology": topology,
+        "num_flat": num_flat,
         "corners": {"TL": c_tl, "TR": c_tr, "BR": c_br, "BL": c_bl}
     }
-
-
-def classify_profile_curve_type(profile_50: np.ndarray, stype: str) -> str:
-    """
-    Clasifica la función geométrica del borde ('standard', 'circular', 'random' o 'none')
-    a partir del perfil 1D del encastre analizando plenitud y asimetría.
-    """
-    if stype == "PLANO":
-        return "none"
-        
-    p = np.abs(profile_50)
-    max_val = float(np.max(p))
-    if max_val < 1e-4:
-        return "none"
-        
-    p_norm = p / max_val
-    active_idx = np.where(p_norm > 0.15)[0]
-    if len(active_idx) < 4:
-        return "standard"
-        
-    sub_p = p_norm[active_idx[0]:active_idx[-1] + 1]
-    half = len(sub_p) // 2
-    left = sub_p[:half]
-    right = sub_p[-half:][::-1]
-    
-    asymmetry = float(np.mean(np.abs(left - right)))
-    fullness = float(np.mean(sub_p))
-    
-    if asymmetry > 0.13:
-        return "random"
-    elif fullness > 0.68:
-        return "circular"
-    else:
-        return "standard"
 
 
 def analyze_piece_shape(img_rgb: np.ndarray) -> Dict[str, Any]:
     """
     Función principal de análisis morfológico de una pieza:
-    1. Binariza la pieza (fondo negro, pieza en blanco).
+    1. Binariza limpiamente la pieza (fondo negro 0, pieza 255).
     2. Extrae contorno externo.
-    3. Detecta esquinas y clasifica los 4 lados (PLANO, MACHO, HEMBRA) y sus funciones de curva.
+    3. Segmenta los 4 lados y calcula sus señales 1D y clasificación topológica.
     """
-    binary = binarize_piece(img_rgb, method="otsu")
+    binary = binarize_piece(img_rgb)
     contour = extract_external_contour(binary)
     sides_info = detect_corners_and_split_sides(contour, binary)
     
     return {
         "binary_mask": binary,
         "contour": contour,
-        "sides": sides_info
+        "sides": sides_info,
+        "topology": sides_info["topology"]
     }
+
+
+def get_rotated_sides(sides_dict: Dict[str, Any], rot_k: int) -> Dict[str, Any]:
+    """
+    Devuelve los lados de una pieza rotada por rot_k * 90° en sentido horario.
+    rot_k in {0, 1, 2, 3}.
+    """
+    if rot_k % 4 == 0:
+        return sides_dict
+        
+    k = rot_k % 4
+    sides_order = ["N", "E", "S", "W"]
+    rotated = {}
+    for i, side in enumerate(sides_order):
+        orig_side = sides_order[(i - k) % 4]
+        rotated[side] = sides_dict[orig_side]
+    return rotated
+
+
+def compute_edge_correlation(
+    side_a: Dict[str, Any],
+    side_b: Dict[str, Any]
+) -> float:
+    """
+    Calcula el producto interno normalizado (correlación tipo Fourier)
+    entre la señal 1D del borde A y el borde B:
+    - Retorna 1.0 si encastran perfectamente (macho con hembra coincidente en altura y forma).
+    - Retorna ~0.0 si los bulbos están desfasados en altura o son ortogonales.
+    - Retorna 0.0 si son incompatibles (macho-macho, hembra-hembra o bordes planos interiores).
+    """
+    type_a = side_a["type"]
+    type_b = side_b["type"]
+    
+    # Dos bordes planos no encajan en el interior
+    if type_a == "PLANO" or type_b == "PLANO":
+        return 0.0
+        
+    # Deben ser complementarios estricto (uno MACHO y uno HEMBRA)
+    is_complementary = (type_a == "MACHO" and type_b == "HEMBRA") or (type_a == "HEMBRA" and type_b == "MACHO")
+    if not is_complementary:
+        return 0.0
+        
+    prof_a = side_a["profile"]
+    prof_b = side_b["profile"]
+    
+    # Las curvas ya están segmentadas en la misma dirección canónica a lo largo de la costura
+    # (Izquierda -> Derecha para N y S; Arriba -> Abajo para E y W).
+    # Su normal exterior es opuesta a la de A (-prof_b).
+    prof_b_comp = -prof_b
+    
+    norm_a = side_a.get("norm", float(np.linalg.norm(prof_a)))
+    norm_b = side_b.get("norm", float(np.linalg.norm(prof_b)))
+    
+    if norm_a < 1e-4 or norm_b < 1e-4:
+        return 0.0
+        
+    # Producto interno continuo discretizado <prof_a, prof_b_comp>
+    dot = float(np.dot(prof_a, prof_b_comp))
+    rho = dot / (norm_a * norm_b)
+    
+    if rho <= 0.0:
+        return 0.0
+        
+    # Ratio de amplitudes para premiar profundidades idénticas
+    amp_ratio = min(norm_a, norm_b) / max(norm_a, norm_b)
+    
+    correlation = float(rho * amp_ratio)
+    return max(0.0, min(1.0, correlation))
 
 
 def compute_jigsaw_shape_compatibility(
@@ -234,33 +285,13 @@ def compute_jigsaw_shape_compatibility(
     side_b: Dict[str, Any]
 ) -> float:
     """
-    Compara dos lados para verificar compatibilidad de encastre:
-    - Si ambos son MACHO o ambos son HEMBRA -> Retorna 1e6 (incompatibles).
-    - Si alguno es PLANO -> Retorna 1e6 (bordes planos no encajan internamente).
-    - Si uno es MACHO y otro HEMBRA -> Retorna la distancia de perfiles cuadrática
-      más una penalización si sus funciones de curva específicas difieren.
+    Función de compatibilidad/costo para el affinity matcher:
+    Convierte la correlación [0, 1] en un costo de disimilitud:
+    - 0.0 para match perfecto.
+    - 1e6 para incompatibles.
     """
-    type_a = side_a["type"]
-    type_b = side_b["type"]
-    
-    if type_a == "PLANO" or type_b == "PLANO":
+    corr = compute_edge_correlation(side_a, side_b)
+    if corr <= 1e-4:
         return 1e6
-        
-    is_complementary = (type_a == "MACHO" and type_b == "HEMBRA") or (type_a == "HEMBRA" and type_b == "MACHO")
-    if not is_complementary:
-        return 1e6
-        
-    # Perfiles complementarios alineados
-    prof_a = side_a["profile"]
-    prof_b_inv = -side_b["profile"] # Hembra se invierte para comparar con Macho
-    
-    diff = prof_a - prof_b_inv
-    base_mse = float(np.mean(diff ** 2))
-    
-    # Penalización por discrepancia en la función de curva específica
-    c_a = side_a.get("curve_type", "standard")
-    c_b = side_b.get("curve_type", "standard")
-    are_equiv = (c_a == c_b) or (c_a in ("wide", "random") and c_b in ("wide", "random"))
-    curve_penalty = 100.0 if (c_a != "none" and c_b != "none" and not are_equiv) else 0.0
-    
-    return base_mse + curve_penalty
+    # Costo inversamente proporcional a la correlación
+    return float((1.0 - corr) * 100.0)

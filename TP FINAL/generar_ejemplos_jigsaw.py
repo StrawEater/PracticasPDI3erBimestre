@@ -40,14 +40,6 @@ def generar_todos_los_ejemplos():
             "desc": "3x3 Nivel Fácil (9 piezas, encastres macho/hembra, sin rotación)"
         },
         {
-            "nombre": "puzzle_4x4_medio",
-            "imagen": os.path.join(img_dir, "barco.jpg"),
-            "rows": 4, "cols": 4,
-            "rotate": False,
-            "seed": 123,
-            "desc": "4x4 Nivel Medio (16 piezas, encastres macho/hembra, sin rotación)"
-        },
-        {
             "nombre": "puzzle_3x3_rotado",
             "imagen": os.path.join(img_dir, "cueva.jpg"),
             "rows": 3, "cols": 3,
@@ -56,37 +48,20 @@ def generar_todos_los_ejemplos():
             "desc": "3x3 Nivel Avanzado con Rotaciones (9 piezas con rotación ortogonal aleatoria 0/90/180/270)"
         },
         {
-            "nombre": "puzzle_3x3_textura",
-            "imagen": os.path.join(img_dir, "algas.jpg"),
-            "rows": 3, "cols": 3,
-            "rotate": False,
-            "slight_rotation": False,
-            "add_stripes": False,
-            "add_marker": False,
-            "seed": 555,
-            "desc": "3x3 Desafío de Texturas (9 piezas con alta frecuencia espacial y encastres)"
-        },
-        {
-            "nombre": "puzzle_3x3_rayas_rotado",
-            "imagen": os.path.join(img_dir, "casita.jpg"),
-            "rows": 3, "cols": 3,
-            "rotate": True,
-            "slight_rotation": True,
-            "add_stripes": True,
-            "add_marker": False,
-            "seed": 888,
-            "desc": "3x3 con Filtro de Rayas Horizontales y Rotaciones Leves (Desafío de Orientación por FFT/Sobel)"
-        },
-        {
-            "nombre": "puzzle_3x3_bordes_mixtos",
+            "nombre": "puzzle_4x4_medio",
             "imagen": os.path.join(img_dir, "barco.jpg"),
-            "rows": 3, "cols": 3,
+            "rows": 4, "cols": 4,
             "rotate": False,
-            "slight_rotation": False,
-            "add_stripes": True,
-            "add_marker": True,
-            "seed": 999,
-            "desc": "3x3 con Encastres Mixtos Específicos (Standard, Circular, Random) y Píxel Marcador"
+            "seed": 123,
+            "desc": "4x4 Nivel Medio (16 piezas, encastres macho/hembra, sin rotación)"
+        },
+        {
+            "nombre": "puzzle_10x10_desafio",
+            "imagen": os.path.join(img_dir, "casita.jpg"),
+            "rows": 10, "cols": 10,
+            "rotate": False,
+            "seed": 42,
+            "desc": "10x10 Desafío Masivo (100 piezas, encastres macho/hembra de alta resolución)"
         }
     ]
     

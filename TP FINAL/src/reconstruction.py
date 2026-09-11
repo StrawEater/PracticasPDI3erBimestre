@@ -30,6 +30,8 @@ class PuzzleReconstructor:
         self.vert = relations["vertical"]
         self.piece_ids = relations["piece_ids"]
         self.rotations = relations["rotations"]
+        self.shapes = relations.get("shapes", {})
+        self.is_jigsaw = relations.get("is_jigsaw", False)
         self.rows = rows
         self.cols = cols
         self.beam_width = beam_width
@@ -39,6 +41,47 @@ class PuzzleReconstructor:
         self.best_grid = None
         self.best_rotations = None
         self.min_total_cost = float("inf")
+        self.placement_history = []
+
+    def _is_position_compatible(
+        self,
+        r: int,
+        c: int,
+        candidate_p: int,
+        candidate_rot: int
+    ) -> bool:
+        """
+        Verifica compatibilidad topológica de la pieza con su posición en la grilla:
+        - Las celdas en el marco perimetral deben tener sus bordes exteriores PLANO.
+        - Los bordes que miran hacia el interior de la grilla NO pueden ser PLANO.
+        """
+        shape_info = self.shapes.get((candidate_p, candidate_rot))
+        if not shape_info or "sides" not in shape_info:
+            return True
+            
+        sides = shape_info["sides"]
+        type_n = sides["N"]["type"]
+        type_s = sides["S"]["type"]
+        type_w = sides["W"]["type"]
+        type_e = sides["E"]["type"]
+        
+        # Límite Norte (r == 0)
+        if r == 0 and type_n != "PLANO": return False
+        if r > 0 and type_n == "PLANO": return False
+        
+        # Límite Sur (r == rows - 1)
+        if r == self.rows - 1 and type_s != "PLANO": return False
+        if r < self.rows - 1 and type_s == "PLANO": return False
+        
+        # Límite Oeste (c == 0)
+        if c == 0 and type_w != "PLANO": return False
+        if c > 0 and type_w == "PLANO": return False
+        
+        # Límite Este (c == cols - 1)
+        if c == self.cols - 1 and type_e != "PLANO": return False
+        if c < self.cols - 1 and type_e == "PLANO": return False
+        
+        return True
 
     def _get_compatibility_cost(
         self,
@@ -53,6 +96,9 @@ class PuzzleReconstructor:
         Calcula el costo medio de colocar (candidate_p, candidate_rot) en (r, c)
         respecto a todos los vecinos ya colocados.
         """
+        if self.is_jigsaw and not self._is_position_compatible(r, c, candidate_p, candidate_rot):
+            return 1e9
+            
         cost = 0.0
         neighbors_count = 0
         
@@ -122,8 +168,19 @@ class PuzzleReconstructor:
         """
         Encuentra el par de piezas adyacentes con menor disimilitud global
         para iniciar el rompecabezas con máxima confianza.
+        Si es jigsaw, garantiza que el par sea topológicamente compatible con (0, 0) y (0, 1).
         Retorna: (p_a, rot_a, p_b, rot_b) en relación horizontal.
         """
+        if self.is_jigsaw:
+            valid_keys = [
+                k for k in self.horiz.keys()
+                if self._is_position_compatible(0, 0, k[0], k[1]) and
+                   self._is_position_compatible(0, 1, k[2], k[3]) and
+                   self.horiz[k] < 1e5
+            ]
+            if valid_keys:
+                return min(valid_keys, key=lambda k: self.horiz[k])
+                
         best_key = min(self.horiz.keys(), key=lambda k: self.horiz[k])
         return best_key
 
@@ -132,7 +189,8 @@ class PuzzleReconstructor:
         grid: List[List[int]],
         rotations: Dict[int, int],
         used_pieces: Set[int],
-        accumulated_cost: float
+        accumulated_cost: float,
+        current_path: List[Dict[str, Any]]
     ) -> bool:
         """
         Búsqueda recursiva eficiente Greedy + Backtracking.
@@ -143,6 +201,7 @@ class PuzzleReconstructor:
                 self.min_total_cost = accumulated_cost
                 self.best_grid = [row.copy() for row in grid]
                 self.best_rotations = rotations.copy()
+                self.placement_history = [dict(step) for step in current_path]
             return True
 
         # Poda por límite de retrocesos
@@ -174,9 +233,17 @@ class PuzzleReconstructor:
             grid[r][c] = p
             rotations[p] = rot
             used_pieces.add(p)
+            current_path.append({
+                "step": len(used_pieces),
+                "piece_id": p,
+                "rotation": rot,
+                "row": r,
+                "col": c,
+                "cost": cost
+            })
 
             # Avanzar recursivamente
-            success = self._backtrack_search(grid, rotations, used_pieces, accumulated_cost + cost)
+            success = self._backtrack_search(grid, rotations, used_pieces, accumulated_cost + cost, current_path)
             if success and self.min_total_cost == 0:
                 return True # Solución perfecta encontrada
 
@@ -184,6 +251,7 @@ class PuzzleReconstructor:
             grid[r][c] = -1
             del rotations[p]
             used_pieces.remove(p)
+            current_path.pop()
             self.backtrack_count += 1
 
             if self.backtrack_count >= self.max_backtracks:
@@ -200,39 +268,96 @@ class PuzzleReconstructor:
         Retorna:
             (grid_resuelto, rotaciones_resueltas)
         """
-        grid = [[-1 for _ in range(self.cols)] for _ in range(self.rows)]
-        rotations = {}
-        used_pieces = set()
-
-        initial_cost = 0.0
         if anchor is not None:
-            anc_p, anc_r, anc_c, anc_rot = anchor
-            grid[anc_r][anc_c] = anc_p
-            rotations[anc_p] = anc_rot
-            used_pieces.add(anc_p)
+            candidate_seeds = [(anchor[0], anchor[3], -1, 0)]
+        elif self.is_jigsaw:
+            candidate_seeds = [
+                k for k in self.horiz.keys()
+                if self._is_position_compatible(0, 0, k[0], k[1]) and
+                   self._is_position_compatible(0, 1, k[2], k[3]) and
+                   self.horiz[k] < 1e5
+            ]
+            candidate_seeds.sort(key=lambda k: self.horiz[k])
+            if not candidate_seeds:
+                candidate_seeds = [self._find_best_seed_pair()]
+            else:
+                candidate_seeds = candidate_seeds[:4]
         else:
-            # 1. Semilla inicial: Colocar el par más compatible en (0, 0) y (0, 1) si cols > 1
-            p_a, rot_a, p_b, rot_b = self._find_best_seed_pair()
-            
-            grid[0][0] = p_a
-            rotations[p_a] = rot_a
-            used_pieces.add(p_a)
+            candidate_seeds = [self._find_best_seed_pair()]
 
-            if self.cols > 1:
-                grid[0][1] = p_b
-                rotations[p_b] = rot_b
-                used_pieces.add(p_b)
-                initial_cost = self.horiz.get((p_a, rot_a, p_b, rot_b), 0.0)
+        global_best_grid = None
+        global_best_rotations = None
+        global_best_history = None
+        global_min_cost = float("inf")
 
-        # Guardar como base preliminar
-        self.best_grid = [row.copy() for row in grid]
-        self.best_rotations = rotations.copy()
+        for seed in candidate_seeds:
+            grid = [[-1 for _ in range(self.cols)] for _ in range(self.rows)]
+            rotations = {}
+            used_pieces = set()
+            current_path = []
+            self.backtrack_count = 0
+            self.min_total_cost = float("inf")
 
-        # 2. Ejecutar búsqueda con backtracking
-        self._backtrack_search(grid, rotations, used_pieces, initial_cost)
+            if anchor is not None:
+                anc_p, anc_r, anc_c, anc_rot = anchor
+                grid[anc_r][anc_c] = anc_p
+                rotations[anc_p] = anc_rot
+                used_pieces.add(anc_p)
+                current_path.append({
+                    "step": 1,
+                    "piece_id": anc_p,
+                    "rotation": anc_rot,
+                    "row": anc_r,
+                    "col": anc_c,
+                    "cost": 0.0
+                })
+                initial_cost = 0.0
+            else:
+                p_a, rot_a, p_b, rot_b = seed
+                grid[0][0] = p_a
+                rotations[p_a] = rot_a
+                used_pieces.add(p_a)
+                current_path.append({
+                    "step": 1,
+                    "piece_id": p_a,
+                    "rotation": rot_a,
+                    "row": 0,
+                    "col": 0,
+                    "cost": 0.0
+                })
 
-        # Si el backtracking no completó por límite de iteraciones, rellenar de forma greedy pura el remanente
-        self._fill_remaining_greedy(self.best_grid, self.best_rotations)
+                if self.cols > 1 and p_b != -1:
+                    grid[0][1] = p_b
+                    rotations[p_b] = rot_b
+                    used_pieces.add(p_b)
+                    initial_cost = self.horiz.get((p_a, rot_a, p_b, rot_b), 0.0)
+                    current_path.append({
+                        "step": 2,
+                        "piece_id": p_b,
+                        "rotation": rot_b,
+                        "row": 0,
+                        "col": 1,
+                        "cost": initial_cost
+                    })
+                else:
+                    initial_cost = 0.0
+
+            self.best_grid = [row.copy() for row in grid]
+            self.best_rotations = rotations.copy()
+            self.placement_history = [dict(step) for step in current_path]
+
+            self._backtrack_search(grid, rotations, used_pieces, initial_cost, current_path)
+            self._fill_remaining_greedy(self.best_grid, self.best_rotations)
+
+            if self.min_total_cost < global_min_cost and len(self.best_rotations) == len(self.piece_ids):
+                global_min_cost = self.min_total_cost
+                global_best_grid = [row.copy() for row in self.best_grid]
+                global_best_rotations = self.best_rotations.copy()
+                global_best_history = [dict(step) for step in self.placement_history]
+
+        self.best_grid = global_best_grid if global_best_grid is not None else self.best_grid
+        self.best_rotations = global_best_rotations if global_best_rotations is not None else self.best_rotations
+        self.placement_history = global_best_history if global_best_history is not None else self.placement_history
         return self.best_grid, self.best_rotations
 
     def _fill_remaining_greedy(self, grid: List[List[int]], rotations: Dict[int, int]) -> None:
@@ -258,6 +383,14 @@ class PuzzleReconstructor:
                         grid[r][c] = best_choice
                         rotations[best_choice] = best_rot
                         placed.add(best_choice)
+                        self.placement_history.append({
+                            "step": len(placed),
+                            "piece_id": best_choice,
+                            "rotation": best_rot,
+                            "row": r,
+                            "col": c,
+                            "cost": best_cost
+                        })
 
 
 def reconstruct_from_relations(
@@ -266,8 +399,9 @@ def reconstruct_from_relations(
     cols: int,
     beam_width: int = 3,
     max_backtracks: int = 500,
-    anchor: Optional[Tuple[int, int, int, int]] = None
-) -> Tuple[List[List[int]], Dict[int, int]]:
+    anchor: Optional[Tuple[int, int, int, int]] = None,
+    return_reconstructor: bool = False
+) -> Any:
     """
     Función principal de reconstrucción basada en relaciones de afinidad.
     """
@@ -278,4 +412,7 @@ def reconstruct_from_relations(
         beam_width=beam_width,
         max_backtracks=max_backtracks
     )
-    return reconstructor.reconstruct(anchor=anchor)
+    grid, pred_rotations = reconstructor.reconstruct(anchor=anchor)
+    if return_reconstructor:
+        return grid, pred_rotations, reconstructor
+    return grid, pred_rotations

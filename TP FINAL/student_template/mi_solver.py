@@ -10,28 +10,33 @@ Integrantes del Grupo:
 
 El flujo de trabajo requerido por la cátedra comprende:
   ---------------------------------------------------------------------------
-  PASO 1: BINARIZACIÓN DE LA PIEZA
-          - Separar la silueta de la pieza (blanco = 255) del fondo (negro = 0).
-          - Aplicar umbralización global (Otsu) o adaptativa y limpieza morfológica.
+  PASO 1: BINARIZACIÓN LIMPIA DE LA PIEZA
+          - Separar la silueta de la pieza (255) del fondo negro puro (0).
+          - Aplicar umbralización y cierre/relleno morfológico para no crear falsos huecos.
   ---------------------------------------------------------------------------
-  PASO 2: DETECCIÓN DE CONTORNOS Y SEGMENTACIÓN DE LADOS
+  PASO 2: DETECCIÓN DE CONTORNOS Y ESQUINAS NOMINALES
           - Extraer el contorno exterior con cv2.findContours.
-          - Detectar las 4 esquinas de la pieza base.
-          - Segmentar el contorno en los 4 lados: Norte, Sur, Este y Oeste.
+          - Detectar las 4 esquinas base (TL, TR, BR, BL).
+          - Segmentar el contorno en los 4 bordes: Norte, Sur, Este y Oeste.
   ---------------------------------------------------------------------------
-  PASO 3: CLASIFICACIÓN MORFOLÓGICA DE ENCASTRES
-          - Para cada lado, determinar si es:
-            * 'PLANO'  (borde exterior de la imagen)
-            * 'MACHO'  (pestaña / saliente hacia afuera)
-            * 'HEMBRA' (hueco / hendidura hacia adentro)
+  PASO 3: SEÑALES 1D Y CLASIFICACIÓN TOPOLÓGICA (Fourier & Álgebra Lineal)
+          - Representar cada borde como una señal 1D s(t) de desviación perpendicular.
+          - Clasificar cada borde en 'PLANO', 'MACHO' o 'HEMBRA'.
+          - Clasificar la pieza según su número de bordes planos:
+            * ESQUINA: 2 lados planos perpendiculares (exactamente 4 piezas en la grilla).
+            * BORDE: 1 lado plano (marco perimetral).
+            * INTERIOR: 0 lados planos (relleno central).
   ---------------------------------------------------------------------------
-  PASO 4: MATRIZ DE RELACIÓN / AFINIDAD DE FORMA Y TEXTURA
-          - Regla dura: Un lado MACHO solo puede encajar con un lado HEMBRA.
-          - Medir la distancia entre las curvas 1D del encastre.
-          - Combinar con la continuidad de color (CIE-Lab) y gradientes (Sobel).
+  PASO 4: MATRIZ DE CORRELACIÓN POR PRODUCTO INTERNO (Tipo Fourier)
+          - Para dos lados enfrentados (uno MACHO y uno HEMBRA), calcular:
+            rho = <s_A, -s_B(1-t)> / (||s_A|| * ||s_B||)
+          - Da 1.0 para encastre exacto, ~0.0 para encastres desfasados/ortogonales,
+            y <= 0 para colisiones (macho-macho o hembra-hembra).
+          - Combinar opcionalmente con color (CIE-Lab) y gradientes (Sobel).
   ---------------------------------------------------------------------------
-  PASO 5: RECONSTRUCCIÓN MEDIANTE BÚSQUEDA VORAZ Y BACKTRACKING
-          - Ensamblar la grilla minimizando la incompatibilidad acumulada.
+  PASO 5: RECONSTRUCCIÓN INTUITIVA
+          - Ensamblar la grilla aprovechando las restricciones topológicas
+            (Esquinas -> Marco Perimetral -> Interior) maximizando la correlación acumulada.
   ---------------------------------------------------------------------------
 """
 

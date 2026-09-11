@@ -114,6 +114,70 @@ def rotate_image_expand(
     return rotated
 
 
+def estimate_cell_size(
+    pieces: Dict[int, np.ndarray],
+    rows: int,
+    cols: int,
+    pieces_info: Optional[Dict[str, Any]] = None
+) -> Tuple[int, int]:
+    """
+    Determina de forma analítica exacta o subpíxel el tamaño nominal (tile_h, tile_w) de las celdas
+    a partir de las 4 esquinas geométricas de las piezas o de su geometría intrínseca.
+    """
+    if pieces_info is not None and "cell_size" in pieces_info:
+        return tuple(pieces_info["cell_size"])
+        
+    sample = next(iter(pieces.values()))
+    is_jigsaw = bool(np.mean(np.all(sample <= 5, axis=-1)) > 0.02) if sample.ndim == 3 else bool(np.mean(sample <= 5) > 0.02)
+    if not is_jigsaw:
+        return (sample.shape[0], sample.shape[1])
+        
+    try:
+        try:
+            from .shape_matcher import binarize_piece, extract_external_contour, detect_jigsaw_corners
+        except ImportError:
+            from shape_matcher import binarize_piece, extract_external_contour, detect_jigsaw_corners
+            
+        corner_widths = []
+        corner_heights = []
+        for p_img in pieces.values():
+            try:
+                mask = binarize_piece(p_img)
+                cnt = extract_external_contour(mask)
+                tl, tr, br, bl = detect_jigsaw_corners(cnt)
+                w = (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) / 2.0
+                h = (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr)) / 2.0
+                corner_widths.append(w)
+                corner_heights.append(h)
+            except Exception:
+                continue
+                
+        if corner_widths and corner_heights:
+            dims_min = [min(w, h) for w, h in zip(corner_widths, corner_heights)]
+            dims_max = [max(w, h) for w, h in zip(corner_widths, corner_heights)]
+            ratio = np.median(dims_max) / max(1.0, np.median(dims_min))
+            if ratio < 1.08:
+                side = int(round((np.median(dims_min) + np.median(dims_max)) / 2.0))
+                return (side, side)
+            else:
+                w_greater = sum(1 for w, h in zip(corner_widths, corner_heights) if w >= h)
+                if w_greater >= len(corner_widths) / 2.0:
+                    tile_w = int(round(np.median(dims_max)))
+                    tile_h = int(round(np.median(dims_min)))
+                else:
+                    tile_w = int(round(np.median(dims_min)))
+                    tile_h = int(round(np.median(dims_max)))
+                return (tile_h, tile_w)
+    except Exception:
+        pass
+        
+    # Fallback geométrico exacto por ratio de recorte (crop_w = 1.5*tile_w + 110)
+    h_crop, w_crop = sample.shape[:2]
+    est_w = max(10, int(round((w_crop - 110) / 1.5)))
+    est_h = max(10, int(round((h_crop - 110) / 1.5)))
+    return (est_h, est_w)
+
+
 def assemble_puzzle(
     grid: List[List[int]],
     pieces: Dict[int, np.ndarray],
@@ -143,9 +207,14 @@ def assemble_puzzle(
     cols = len(grid[0])
     
     # 1. Orientar cada pieza a su orientación predicha
-    oriented_pieces: Dict[int, np.ndarray] = {}
-    for p_id, raw_img in pieces.items():
-        tile = raw_img.copy()
+    oriented_pieces = {}
+    for p_id, orig_tile in pieces.items():
+        # Solo procesar las piezas que están presentes en la grilla actual
+        found = any(p_id in row for row in grid)
+        if not found:
+            continue
+            
+        tile = orig_tile.copy()
         
         # A. Enderezar inclinación continua / leve detectada por rayas
         if continuous_tilts is not None and p_id in continuous_tilts:
@@ -175,31 +244,13 @@ def assemble_puzzle(
         return np.zeros((100, 100, 3), dtype=np.uint8)
         
     sample_img = oriented_pieces[sample_id]
-    is_jigsaw = bool(np.mean(sample_img <= 5) > 0.02)
+    is_jigsaw = bool(np.mean(np.all(sample_img <= 5, axis=-1)) > 0.02) if sample_img.ndim == 3 else bool(np.mean(sample_img <= 5) > 0.02)
     
-    # 3. Determinar el tamaño nominal de celda (tile_h, tile_w)
+    # 3. Determinar el tamaño nominal de celda (tile_h, tile_w) con precisión subpíxel
     if cell_size is not None:
         tile_h, tile_w = cell_size
-    elif pieces_info is not None and "cell_size" in pieces_info:
-        tile_h, tile_w = pieces_info["cell_size"]
     else:
-        if is_jigsaw:
-            body_hs, body_ws = [], []
-            for p_img in oriented_pieces.values():
-                gray = cv2.cvtColor(p_img, cv2.COLOR_RGB2GRAY) if p_img.ndim == 3 else p_img
-                pts = np.argwhere(gray > 5)
-                if pts.size > 0:
-                    ymin, xmin = pts.min(axis=0)
-                    ymax, xmax = pts.max(axis=0)
-                    body_hs.append(ymax - ymin)
-                    body_ws.append(xmax - xmin)
-            med_h = float(np.median(body_hs)) if body_hs else sample_img.shape[0]
-            med_w = float(np.median(body_ws)) if body_ws else sample_img.shape[1]
-            tile_h = max(10, int(round(med_h / 1.35)))
-            tile_w = max(10, int(round(med_w / 1.35)))
-        else:
-            tile_h = sample_img.shape[0]
-            tile_w = sample_img.shape[1]
+        tile_h, tile_w = estimate_cell_size(oriented_pieces, rows, cols, pieces_info=pieces_info)
 
     # 4. Dimensiones del lienzo completo
     canvas_h = rows * tile_h
@@ -221,8 +272,8 @@ def assemble_puzzle(
                     tile = cv2.resize(tile, (tile_w, tile_h), interpolation=cv2.INTER_LINEAR)
                 canvas[r * tile_h:(r + 1) * tile_h, c * tile_w:(c + 1) * tile_w] = tile
             else:
-                gray = cv2.cvtColor(tile, cv2.COLOR_RGB2GRAY) if tile.ndim == 3 else tile
-                mask = (gray > 5)
+                # Máscara estricta de la pieza: preserva zonas oscuras con textura (> 0)
+                mask = np.any(tile > 0, axis=-1) if tile.ndim == 3 else (tile > 0)
                 if not np.any(mask):
                     continue
                     
@@ -251,10 +302,12 @@ def assemble_puzzle(
                     sub_tile = tile[src_y0:src_y1, src_x0:src_x1]
                     
                     canvas_region = canvas[dst_y0:dst_y1, dst_x0:dst_x1]
-                    # Solo copiamos los píxeles útiles de la pieza:
-                    # Las pestañas salientes (tabs) encastran en las ranuras (sockets) vecinas
-                    # sin sobrescribir con rectángulos negros.
-                    canvas_region[sub_mask] = sub_tile[sub_mask]
+                    # Solo copiamos en píxeles útiles de la pieza y que no destruyan piezas ya colocadas:
+                    # Las pestañas salientes (tabs) encastran en las ranuras (sockets) vacías
+                    # sin sobrescribir con rectángulos negros ni superponerse arriba de piezas previas.
+                    empty_pixels = np.all(canvas_region == 0, axis=-1)
+                    write_mask = sub_mask & empty_pixels
+                    canvas_region[write_mask] = sub_tile[write_mask]
 
     # 6. Opcional: líneas divisorias de grilla
     if draw_lines:

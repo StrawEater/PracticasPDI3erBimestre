@@ -220,19 +220,12 @@ def compute_border_dissimilarity(
 
 def compute_all_pairwise_relations(
     pieces: Dict[int, np.ndarray],
-    allow_rotations: bool = False
+    allow_rotations: bool = False,
+    has_stripes: bool = False
 ) -> Dict[str, Any]:
     """
     Calcula la matriz/tensor completo de afinidad entre todos los pares de piezas
     para las direcciones HORIZONTAL (Este-Oeste) y VERTICAL (Sur-Norte).
-    
-    Estructura retornada:
-    {
-        'horizontal': { (p_a, rot_a, p_b, rot_b): costo }, # p_a a la izquierda de p_b
-        'vertical':   { (p_a, rot_a, p_b, rot_b): costo }, # p_a arriba de p_b
-        'piece_ids': [0, 1, ...],
-        'rotations': [0, 90, 180, 270] o [0]
-    }
     """
     piece_ids = sorted(list(pieces.keys()))
     rotations = [0, 90, 180, 270] if allow_rotations else [0]
@@ -259,10 +252,11 @@ def compute_all_pairwise_relations(
                 "E": extract_edge_profile(preprocessed, "E")
             }
             
-            try:
-                stripe_angles[(p_id, rot)] = detect_stripe_orientation(rotated_img)
-            except Exception:
-                stripe_angles[(p_id, rot)] = 0.0
+            if has_stripes:
+                try:
+                    stripe_angles[(p_id, rot)] = detect_stripe_orientation(rotated_img)
+                except Exception:
+                    stripe_angles[(p_id, rot)] = 0.0
                 
             if is_jigsaw:
                 try:
@@ -288,34 +282,43 @@ def compute_all_pairwise_relations(
                     shape_b = shapes.get((p_b, rot_b))
                     ang_b = stripe_angles.get((p_b, rot_b), 0.0)
                     
-                    # Coherencia de orientación de rayas periódicas
-                    stripe_diff = abs(ang_a - ang_b)
-                    stripe_diff = min(stripe_diff, 180.0 - stripe_diff)
-                    stripe_penalty = (stripe_diff * 4.0) if stripe_diff > 18.0 else 0.0
+                    # Coherencia de orientación de rayas periódicas (solo si has_stripes es True)
+                    if has_stripes:
+                        stripe_diff = abs(ang_a - ang_b)
+                        stripe_diff = min(stripe_diff, 180.0 - stripe_diff)
+                        stripe_penalty = (stripe_diff * 4.0) if stripe_diff > 18.0 else 0.0
+                    else:
+                        stripe_penalty = 0.0
                     
                     # Horizontal: p_a a la izquierda de p_b (Borde Este de A vs Borde Oeste de B)
-                    h_cost = compute_border_dissimilarity(prof_a["E"], prof_b["W"])
                     if shape_a and shape_b:
                         shape_h = compute_jigsaw_shape_compatibility(shape_a["sides"]["E"], shape_b["sides"]["W"])
                         if shape_h >= 1e5:
                             h_cost = 1e6 # Incompatible: ambos macho, ambos hembra o borde plano
                         else:
-                            h_cost = 0.5 * h_cost + 0.5 * min(shape_h, 500.0)
+                            color_h = compute_border_dissimilarity(prof_a["E"], prof_b["W"])
+                            h_cost = (shape_h * 10.0) + (0.1 * min(color_h, 300.0))
+                    else:
+                        h_cost = compute_border_dissimilarity(prof_a["E"], prof_b["W"])
                     horiz_relations[(p_a, rot_a, p_b, rot_b)] = h_cost + stripe_penalty
                     
                     # Vertical: p_a arriba de p_b (Borde Sur de A vs Borde Norte de B)
-                    v_cost = compute_border_dissimilarity(prof_a["S"], prof_b["N"])
                     if shape_a and shape_b:
                         shape_v = compute_jigsaw_shape_compatibility(shape_a["sides"]["S"], shape_b["sides"]["N"])
                         if shape_v >= 1e5:
                             v_cost = 1e6
                         else:
-                            v_cost = 0.5 * v_cost + 0.5 * min(shape_v, 500.0)
+                            color_v = compute_border_dissimilarity(prof_a["S"], prof_b["N"])
+                            v_cost = (shape_v * 10.0) + (0.1 * min(color_v, 300.0))
+                    else:
+                        v_cost = compute_border_dissimilarity(prof_a["S"], prof_b["N"])
                     vert_relations[(p_a, rot_a, p_b, rot_b)] = v_cost + stripe_penalty
                     
     return {
         "horizontal": horiz_relations,
         "vertical": vert_relations,
         "piece_ids": piece_ids,
-        "rotations": rotations
+        "rotations": rotations,
+        "shapes": shapes,
+        "is_jigsaw": is_jigsaw
     }

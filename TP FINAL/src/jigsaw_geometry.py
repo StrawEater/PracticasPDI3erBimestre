@@ -120,6 +120,15 @@ class JigsawGridGeometry:
         self.horiz_profile_types = np.random.choice(self.allowed_profiles, size=(rows, cols - 1))
         self.vert_profile_types = np.random.choice(self.allowed_profiles, size=(rows - 1, cols))
 
+        # Variabilidad de encastres: centros desplazados a lo largo del borde (más arriba/abajo),
+        # profundidades variables (más/menos pronunciados) y anchos adaptables
+        self.horiz_centers = np.random.uniform(0.38, 0.62, size=(rows, cols - 1))
+        self.vert_centers = np.random.uniform(0.38, 0.62, size=(rows - 1, cols))
+        self.horiz_depths = np.random.uniform(0.17, 0.23, size=(rows, cols - 1))
+        self.vert_depths = np.random.uniform(0.17, 0.23, size=(rows - 1, cols))
+        self.horiz_widths = np.random.uniform(0.28, 0.35, size=(rows, cols - 1))
+        self.vert_widths = np.random.uniform(0.28, 0.35, size=(rows - 1, cols))
+
         # Precomputar las costuras canónicas compartidas para garantizar 0 huecos y 0 discrepancia
         self._seams_v = {} # Costuras horizontales entre fila r y r+1
         self._seams_h = {} # Costuras verticales entre columna c y c+1
@@ -139,9 +148,9 @@ class JigsawGridGeometry:
                 n = np.array([0.0, 1.0], dtype=np.float32) if tab_dir == 1 else np.array([0.0, -1.0], dtype=np.float32)
                 
                 length = float(self.tile_w)
-                depth = length * 0.20
-                width = length * 0.32
-                center = 0.5 * length
+                depth = length * float(self.vert_depths[r, c])
+                width = length * float(self.vert_widths[r, c])
+                center = float(self.vert_centers[r, c]) * length
                 
                 pts = []
                 for t in np.linspace(0.0, 1.0, num_pts):
@@ -172,9 +181,9 @@ class JigsawGridGeometry:
                 n = np.array([1.0, 0.0], dtype=np.float32) if tab_dir == 1 else np.array([-1.0, 0.0], dtype=np.float32)
                 
                 length = float(self.tile_h)
-                depth = length * 0.20
-                width = length * 0.32
-                center = 0.5 * length
+                depth = length * float(self.horiz_depths[r, c])
+                width = length * float(self.horiz_widths[r, c])
+                center = float(self.horiz_centers[r, c]) * length
                 
                 pts = []
                 for t in np.linspace(0.0, 1.0, num_pts):
@@ -319,7 +328,10 @@ class JigsawGridGeometry:
         dst_y1 = dst_y0 + (src_y1 - src_y0)
         
         if src_x1 > src_x0 and src_y1 > src_y0:
-            piece_rgb[dst_y0:dst_y1, dst_x0:dst_x1] = full_image_rgb[src_y0:src_y1, src_x0:src_x1]
+            patch = full_image_rgb[src_y0:src_y1, src_x0:src_x1]
+            # Garantizar que los píxeles de la imagen dentro de la pieza tengan valor mínimo 1
+            # para diferenciar infaliblemente el contenido de la pieza del fondo negro (0, 0, 0)
+            piece_rgb[dst_y0:dst_y1, dst_x0:dst_x1] = np.maximum(patch, 1)
             
         # Polígono en coordenadas locales del lienzo centrado
         local_poly = poly.copy()

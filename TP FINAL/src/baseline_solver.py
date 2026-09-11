@@ -17,12 +17,12 @@ try:
     from .utils import load_image, save_image, save_json, load_json, rotate_image_clockwise, assemble_puzzle
     from .affinity_matcher import compute_all_pairwise_relations
     from .reconstruction import reconstruct_from_relations
-    from .stripe_analyzer import detect_stripe_orientation, rectify_piece_rotation
+    from .stripe_analyzer import detect_stripe_orientation, detect_stripe_orientation_fft, rectify_piece_rotation
 except ImportError:
     from utils import load_image, save_image, save_json, load_json, rotate_image_clockwise, assemble_puzzle
     from affinity_matcher import compute_all_pairwise_relations
     from reconstruction import reconstruct_from_relations
-    from stripe_analyzer import detect_stripe_orientation, rectify_piece_rotation
+    from stripe_analyzer import detect_stripe_orientation, detect_stripe_orientation_fft, rectify_piece_rotation
 
 
 class BaselineSolver:
@@ -53,6 +53,18 @@ class BaselineSolver:
         if not piece_files:
             raise ValueError(f"No se encontraron imágenes en: {pieces_dir}")
             
+        # Intentar inferir dimensiones desde ground_truth.json si existe
+        gt_path = os.path.join(self.puzzle_dir, "ground_truth.json")
+        if os.path.isfile(gt_path):
+            self.gt_data = load_json(gt_path)
+            self.rows = self.gt_data.get("rows", 0)
+            self.cols = self.gt_data.get("cols", 0)
+            self.allow_rotations = self.gt_data.get("allow_rotations", False)
+        else:
+            self.gt_data = {}
+            self.rows = 0
+            self.cols = 0
+            
         self.detected_tilts = {}
         self.pieces_rectified = {}
         for f in piece_files:
@@ -60,18 +72,47 @@ class BaselineSolver:
             img_rgb = load_image(os.path.join(pieces_dir, f))
             self.pieces_raw[p_id] = img_rgb
             
-            # Detección de inclinación/rotación mediante el patrón de rayas horizontales
-            tilt_angle = detect_stripe_orientation(img_rgb)
-            self.detected_tilts[p_id] = tilt_angle
+            has_slight_rotation = self.gt_data.get("slight_rotation", False)
+            has_stripes = self.gt_data.get("stripes", {}).get("enabled", False)
             
-            # Si tiene inclinación leve continua (rotalas un poco) respecto a los ejes ortogonales:
-            # Enderezarla para el cálculo de compatibilidad
-            is_orthogonal = (abs(tilt_angle) < 2.0) or (abs(abs(tilt_angle) - 90.0) < 5.0)
-            if not is_orthogonal:
-                rectified_img, _ = rectify_piece_rotation(img_rgb, -tilt_angle)
-                self.pieces_rectified[p_id] = rectified_img
+            if has_slight_rotation and has_stripes:
+                # Estimar rotación leve mediante pico espectral 2D Fourier de las rayas
+                tilt_raw = detect_stripe_orientation_fft(img_rgb)
+                is_ortho = (abs(tilt_raw) < 1.0) or (abs(abs(tilt_raw) - 90.0) < 1.5)
+                if not is_ortho:
+                    tilt_angle = round(float(tilt_raw), 2)
+                    rectified_img, _ = rectify_piece_rotation(img_rgb, -tilt_angle)
+                else:
+                    tilt_angle = 0.0
+                    rectified_img = img_rgb
+            elif has_slight_rotation:
+                # Detección de inclinación continua sobre los ejes del contorno (minAreaRect)
+                gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+                _, binary = cv2.threshold(gray, 3, 255, cv2.THRESH_BINARY)
+                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                if contours:
+                    cnt = max(contours, key=cv2.contourArea)
+                    rect = cv2.minAreaRect(cnt)
+                    angle = rect[2]
+                    contour_tilt = angle % 90.0
+                    if contour_tilt > 45.0:
+                        contour_tilt -= 90.0
+                else:
+                    contour_tilt = 0.0
+                    
+                # Si el contorno está inclinado respecto a la ortogonalidad (>= 1.5 grados)
+                if abs(contour_tilt) >= 1.5:
+                    tilt_angle = round(float(contour_tilt), 2)
+                    rectified_img, _ = rectify_piece_rotation(img_rgb, -tilt_angle)
+                else:
+                    tilt_angle = 0.0
+                    rectified_img = img_rgb
             else:
-                self.pieces_rectified[p_id] = img_rgb
+                tilt_angle = 0.0
+                rectified_img = img_rgb
+                    
+            self.detected_tilts[p_id] = tilt_angle
+            self.pieces_rectified[p_id] = rectified_img
             
             # Procesamiento de espacio de color
             if self.color_space == "LAB":
@@ -80,16 +121,7 @@ class BaselineSolver:
                 self.pieces_processed[p_id] = self.pieces_rectified[p_id].astype(np.float32)
                 
         self.num_pieces = len(self.pieces_raw)
-        
-        # Intentar inferir dimensiones desde ground_truth.json si existe
-        gt_path = os.path.join(self.puzzle_dir, "ground_truth.json")
-        if os.path.isfile(gt_path):
-            self.gt_data = load_json(gt_path)
-            self.rows = self.gt_data.get("rows", int(np.sqrt(self.num_pieces)))
-            self.cols = self.gt_data.get("cols", int(np.sqrt(self.num_pieces)))
-            self.allow_rotations = self.gt_data.get("allow_rotations", False)
-        else:
-            self.gt_data = {}
+        if self.rows == 0 or self.cols == 0:
             side = int(np.sqrt(self.num_pieces))
             self.rows = side
             self.cols = side
@@ -163,9 +195,11 @@ class BaselineSolver:
         print("             (Filtro bilateral + CIE-Lab + Gradientes Sobel + Continuidad 2do orden)")
         print("-" * 60)
         
+        has_stripes = self.gt_data.get("stripes", {}).get("enabled", False)
         self.relations = compute_all_pairwise_relations(
             self.pieces_rectified,
-            allow_rotations=rot_allowed
+            allow_rotations=rot_allowed,
+            has_stripes=has_stripes
         )
         print(f"[OK] Afinidad calculada: {len(self.relations['horizontal'])} pares horizontales, "
               f"{len(self.relations['vertical'])} pares verticales.")
@@ -185,14 +219,16 @@ class BaselineSolver:
                 anchor = (marker_p, r_anc, c_anc, 0)
                 print(f"[PDI - MARCADOR] Pieza ancla detectada: ID {marker_p} fijada en ({r_anc}, {c_anc}).")
 
-        grid, pred_rotations = reconstruct_from_relations(
+        grid, pred_rotations, reconstructor = reconstruct_from_relations(
             relations=self.relations,
             rows=r_grid,
             cols=c_grid,
             beam_width=beam_width,
             max_backtracks=max_backtracks,
-            anchor=anchor
+            anchor=anchor,
+            return_reconstructor=True
         )
+        self.placement_history = reconstructor.placement_history
         
         print("[OK] Grilla reconstruida exitosamente.")
         return grid, pred_rotations
